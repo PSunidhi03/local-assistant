@@ -1,0 +1,42 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- IDE ---
+.vscode/
+.idea/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Docker ---
+# (compose files and Dockerfiles are meant to be committed — nothing to ignore here by default)
+
+# --- Data / local test repos ---
+# Don't accidentally commit a cloned test repo if you ever put one inside this project folder
+test-repos/
+
+# --- Frontend (React), once that exists ---
+node_modules/
+dist/
+build/
+*.local
+
+# --- Hugging Face / model caches, if ever created locally in-project ---
+.cache/
