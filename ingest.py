@@ -79,18 +79,77 @@ def get_git_info(repo_path: Path) -> tuple[str, str]:
 
     return commit_hash, branch_name
 
+import psycopg2
+
+DB_CONFIG = {
+    "host": "localhost",
+    "port": 5432,
+    "dbname": "onboarding_assistant",
+    "user": "postgres",
+    "password": "postgres",
+}
+
+
+def insert_repo_and_chunks(repo_name: str, branch: str, commit_hash: str, all_chunks: list[dict]):
+    """all_chunks is a list of dicts, each with: file_path, chunk_no, start_line, end_line, text, embedding"""
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            INSERT INTO repos (repo_name, branch, commit_hash)
+            VALUES (%s, %s, %s)
+            RETURNING id
+            """,
+            (repo_name, branch, commit_hash),
+        )
+        repo_id = cur.fetchone()[0]
+
+        for chunk in all_chunks:
+            cur.execute(
+                """
+                INSERT INTO chunks (repo_id, file_path, chunk_no, start_line, end_line, chunk_text, embedding)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    repo_id,
+                    chunk["file_path"],
+                    chunk["chunk_no"],
+                    chunk["start_line"],
+                    chunk["end_line"],
+                    chunk["text"],
+                    chunk["embedding"],
+                ),
+            )
+
+        conn.commit()
+        print(f"Inserted repo_id={repo_id} with {len(all_chunks)} chunks.")
+
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
 if __name__ == "__main__":
-    repo_path = Path("C:/Users/P.Sunidhi/Desktop/test-repos")  
-    found = collect_files(repo_path)
-    print(f"Found {len(found)} files to ingest:")
-    for f in found:
-        print(f" - {f}")
-    sample_chunks = chunk_file(found[0])
-    print(f"\n{found[0]} produced {len(sample_chunks)} chunks:")
-    for c in sample_chunks:
-        print(f"  chunk {c['chunk_no']}: lines {c['start_line']}-{c['end_line']}")
-    sample_chunks = embed_chunks(sample_chunks)
-    print(f"\nFirst chunk embedding: length={len(sample_chunks[0]['embedding'])}")
-    print(f"First 5 values: {sample_chunks[0]['embedding'][:5]}")
+    repo_path = Path(r"test-repos\nanoGPT")
+    repo_name = "nanoGPT"
+
+    commit_hash, branch = get_git_info(repo_path)
+    print(f"Ingesting {repo_name} @ {branch} ({commit_hash[:8]})")
+
+    files = collect_files(repo_path)
+    all_chunks = []
+    for f in files:
+        file_chunks = chunk_file(f)
+        file_chunks = embed_chunks(file_chunks)
+        for c in file_chunks:
+            c["file_path"] = f.relative_to(repo_path).as_posix()  # store relative path, not your full local path
+        all_chunks.extend(file_chunks)
+
+    print(f"Total chunks across {len(files)} files: {len(all_chunks)}")
+    insert_repo_and_chunks(repo_name, branch, commit_hash, all_chunks)
     
     
