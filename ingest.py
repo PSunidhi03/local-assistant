@@ -89,6 +89,30 @@ DB_CONFIG = {
     "password": "postgres",
 }
 
+def get_existing_commit_hash(repo_name: str, branch: str) -> str | None:
+    """Return the stored commit_hash for this repo+branch, or None if never ingested."""
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT commit_hash FROM repos WHERE repo_name = %s AND branch = %s",
+        (repo_name, branch),
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row[0] if row else None
+
+def delete_existing_repo(repo_name: str, branch: str):
+    """Delete the repos row for this repo+branch. ON DELETE CASCADE removes its chunks too."""
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM repos WHERE repo_name = %s AND branch = %s",
+        (repo_name, branch),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def insert_repo_and_chunks(repo_name: str, branch: str, commit_hash: str, all_chunks: list[dict]):
     """all_chunks is a list of dicts, each with: file_path, chunk_no, start_line, end_line, text, embedding"""
@@ -134,22 +158,29 @@ def insert_repo_and_chunks(repo_name: str, branch: str, commit_hash: str, all_ch
         conn.close()
 
 if __name__ == "__main__":
-    repo_path = Path(r"test-repos\nanoGPT")
+    repo_path = Path(r"C:\Users\P.Sunidhi\Desktop\test-repos\nanoGPT")
     repo_name = "nanoGPT"
 
     commit_hash, branch = get_git_info(repo_path)
-    print(f"Ingesting {repo_name} @ {branch} ({commit_hash[:8]})")
 
-    files = collect_files(repo_path)
-    all_chunks = []
-    for f in files:
-        file_chunks = chunk_file(f)
-        file_chunks = embed_chunks(file_chunks)
-        for c in file_chunks:
-            c["file_path"] = f.relative_to(repo_path).as_posix()  # store relative path, not your full local path
-        all_chunks.extend(file_chunks)
+    existing_hash = get_existing_commit_hash(repo_name, branch)
+    if existing_hash == commit_hash:
+        print(f"Repo already ingested at commit {commit_hash[:8]} — nothing to do.")
+    else:
+        if existing_hash is not None:
+            print(f"Repo changed ({existing_hash[:8]} -> {commit_hash[:8]}), re-ingesting...")
+            delete_existing_repo(repo_name, branch)
+        else:
+            print(f"Ingesting {repo_name} @ {branch} ({commit_hash[:8]}) for the first time")
 
-    print(f"Total chunks across {len(files)} files: {len(all_chunks)}")
-    insert_repo_and_chunks(repo_name, branch, commit_hash, all_chunks)
-    
-    
+        files = collect_files(repo_path)
+        all_chunks = []
+        for f in files:
+            file_chunks = chunk_file(f)
+            file_chunks = embed_chunks(file_chunks)
+            for c in file_chunks:
+                c["file_path"] = f.relative_to(repo_path).as_posix()
+            all_chunks.extend(file_chunks)
+
+        print(f"Total chunks across {len(files)} files: {len(all_chunks)}")
+        insert_repo_and_chunks(repo_name, branch, commit_hash, all_chunks)
